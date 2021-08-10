@@ -87,7 +87,7 @@ def aggregate(tsdf, freq, func, metricCols = None, prefix = None):
         res = res.agg(f.max('struct_cols').alias("ceil_data")).select(*groupingCols, f.col("ceil_data.*"))
         new_cols = [f.col(tsdf.ts_col)] + [f.col(c).alias("{}".format(prefix) + c) for c in metricCols]
         res = res.select(*groupingCols, *new_cols)
-    else func == custom_resample_func:
+    elif func == custom_resample_func:
         #df = df.drop_duplicates()
         new_df = df.withColumn(ts_col, agg_key).withColumn(ts_col, f.col(ts_col).start)
         result = new_df.groupBy(*groupingCols).applyInPandas(resampling_grp,schema = byof_schema)
