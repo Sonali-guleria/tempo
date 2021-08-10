@@ -2,6 +2,7 @@ import pyspark.sql.functions as f
 from pyspark.sql.window import Window
 import tempo.resample as rs
 import tempo.io as tio
+import pandas as pd
 
 class TSDF:
 
@@ -451,6 +452,7 @@ class TSDF:
       byof_schema = self.df.schema
     
     custom_resample_func = func
+    print(custom_resample_func)
     def resampling_inner(df):
       """
       This is the pandas udf that applied the custom function on group of data
