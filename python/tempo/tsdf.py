@@ -440,6 +440,39 @@ class TSDF:
     enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
     return(enriched_tsdf)
 
+  def resample_grp(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
+    """
+    function to upsample based on frequency and aggregate function similar to pandas
+    :param freq: frequency for upsample - valid inputs are "hr", "min", "sec" corresponding to hour, minute, or second
+    :param func: function used to aggregate input
+    :return: TSDF object with sample data using aggregate function
+    """
+    if byof_schema is None:
+      byof_schema = self.df.schema
+
+    agg_window = window(f.col(self.ts_col),freq )
+    df = self.df.drop_duplicates()
+    new_df = df.withColumn(self.ts_col, agg_window).withColumn(self.ts_col, f.col(self.ts_col).start)
+    result = new_df.groupBy(self.partitionCols, agg_window).applyInPandas(resampling_inner,schema = byof_schema)
+    return(result)
+
+
+  def resampling_inner(df):
+    """
+    This is the pandas udf that applied the custom function on group of data
+    """
+    x = df.columns
+    try:
+      df2 = df.set_index(ts_col)
+      df2 = custom_resample_func(df2)
+      df2 = df2.dropna()
+      df2.reset_index(inplace=True)
+    except Exception as e:
+      df2 = pd.DataFrame(columns=x)
+      df2 = df2.append({'Result': f"{e.__class__.__name__}: {e}"}, ignore_index=True)
+  return(df2)
+
+
   def calc_bars(tsdf, freq, func = None, metricCols = None):
 
       resample_open = tsdf.resample(freq=freq, func='floor', metricCols = metricCols, prefix='open')
