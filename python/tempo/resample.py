@@ -1,5 +1,5 @@
 import pyspark.sql.functions as f
-from custom import custom_resample_func
+from tempo.custom import custom_resample_func
 
 # define global frequency options
 import tempo
