@@ -470,7 +470,7 @@ class TSDF:
     except Exception as e:
       df2 = pd.DataFrame(columns=x)
       df2 = df2.append({'Result': f"{e.__class__.__name__}: {e}"}, ignore_index=True)
-  return(df2)
+    return(df2)
 
 
   def calc_bars(tsdf, freq, func = None, metricCols = None):
