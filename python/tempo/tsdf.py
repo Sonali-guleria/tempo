@@ -448,18 +448,20 @@ class TSDF:
     :param func: function used to aggregate input
     :return: TSDF object with sample data using aggregate function
     """
+
+    ## handle below
     if byof_schema is None:
       byof_schema = self.df.schema
     
     custom_resample_func = func
-    print(custom_resample_func)
+    ts = self.ts_col
     def resampling_inner(df):
       """
       This is the pandas udf that applied the custom function on group of data
       """
       x = df.columns
       try:
-        df2 = df.set_index(ts_col)
+        df2 = df.set_index(ts)
         df2 = custom_resample_func(df2)
         df2 = df2.dropna()
         df2.reset_index(inplace=True)
@@ -470,8 +472,8 @@ class TSDF:
 
     agg_window = f.window(f.col(self.ts_col),freq )
     df = self.df.drop_duplicates()
-    new_df = df.withColumn(self.ts_col, agg_window).withColumn(self.ts_col, f.col(self.ts_col).start)
-    result = new_df.groupBy(self.partitionCols+[self.ts_col]).applyInPandas(resampling_inner,schema = byof_schema)
+    new_df = df.withColumn(ts, agg_window).withColumn(ts, f.col(ts).start)
+    result = new_df.groupBy(self.partitionCols+[ts]).applyInPandas(resampling_inner,schema = byof_schema)
     return(result)
 
   
