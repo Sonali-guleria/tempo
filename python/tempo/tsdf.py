@@ -441,7 +441,7 @@ class TSDF:
     enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
     return(enriched_tsdf)
 
-  def resample_grp(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
+  def resample_byof(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
     """
     function to upsample based on frequency and aggregate function similar to pandas
     :param freq: frequency for upsample - valid inputs are "hr", "min", "sec" corresponding to hour, minute, or second
