@@ -1,4 +1,5 @@
 import pyspark.sql.functions as f
+from custom import custom_resample_func
 
 # define global frequency options
 import tempo
@@ -18,7 +19,7 @@ ceiling = "ceil"
 freq_dict = {'sec' : 'seconds', 'min' : 'minutes', 'hr' : 'hours', 'day' : 'days'}
 
 allowableFreqs = [SEC, MIN, HR, DAY]
-allowableFuncs = [floor, min, max, average, ceiling]
+allowableFuncs = [floor, min, max, average, ceiling, custom_resample_func]
 
 def __appendAggKey(tsdf, freq = None):
     """
@@ -86,6 +87,11 @@ def aggregate(tsdf, freq, func, metricCols = None, prefix = None):
         res = res.agg(f.max('struct_cols').alias("ceil_data")).select(*groupingCols, f.col("ceil_data.*"))
         new_cols = [f.col(tsdf.ts_col)] + [f.col(c).alias("{}".format(prefix) + c) for c in metricCols]
         res = res.select(*groupingCols, *new_cols)
+    else func == custom_resample_func:
+        #df = df.drop_duplicates()
+        new_df = df.withColumn(ts_col, agg_key).withColumn(ts_col, f.col(ts_col).start)
+        result = new_df.groupBy(*groupingCols).applyInPandas(resampling_grp,schema = byof_schema)
+        return(tempo.TSDF(result, ts_col = tsdf.ts_col, partition_cols = tsdf.partitionCols))
 
     # aggregate by the window and drop the end time (use start time as new ts_col)
     res = res.drop(tsdf.ts_col).withColumnRenamed('agg_key', tsdf.ts_col).withColumn(tsdf.ts_col, f.col(tsdf.ts_col).start)
@@ -95,6 +101,22 @@ def aggregate(tsdf, freq, func, metricCols = None, prefix = None):
     sel_and_sort = tsdf.partitionCols + [tsdf.ts_col] + sorted(non_part_cols)
     res = res.select(sel_and_sort)
     return(tempo.TSDF(res, ts_col = tsdf.ts_col, partition_cols = tsdf.partitionCols))
+
+def resampling_grp(df):
+  
+  """
+  This is the pandas udf that applied the custom function on group of data
+  """
+  x = df.columns
+  try:
+    df2 = df.set_index(ts_col)
+    df2 = custom_resample_func(df2)
+    df2 = df2.dropna()
+    df2.reset_index(inplace=True)
+  except Exception as e:
+    df2 = pd.DataFrame(columns=x)
+    df2 = df2.append({'Result': f"{e.__class__.__name__}: {e}"}, ignore_index=True)
+  return(df2)
 
 
 def checkAllowableFreq(tsdf, freq):

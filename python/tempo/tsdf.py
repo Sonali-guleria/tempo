@@ -429,7 +429,7 @@ class TSDF:
   def write(self, spark, tabName, optimizationCols = None):
     tio.write(self, spark, tabName, optimizationCols)
 
-  def resample(self, freq, func=None, metricCols = None, prefix=None):
+  def resample(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
     """
     function to upsample based on frequency and aggregate function similar to pandas
     :param freq: frequency for upsample - valid inputs are "hr", "min", "sec" corresponding to hour, minute, or second
@@ -437,7 +437,7 @@ class TSDF:
     :return: TSDF object with sample data using aggregate function
     """
     rs.validateFuncExists(func)
-    enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
+    enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix, byof_schema)
     return(enriched_tsdf)
 
   def calc_bars(tsdf, freq, func = None, metricCols = None):
