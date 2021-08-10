@@ -450,7 +450,7 @@ class TSDF:
     if byof_schema is None:
       byof_schema = self.df.schema
 
-    agg_window = window(f.col(self.ts_col),freq )
+    agg_window = f.window(f.col(self.ts_col),freq )
     df = self.df.drop_duplicates()
     new_df = df.withColumn(self.ts_col, agg_window).withColumn(self.ts_col, f.col(self.ts_col).start)
     result = new_df.groupBy(self.partitionCols, agg_window).applyInPandas(resampling_inner,schema = byof_schema)
