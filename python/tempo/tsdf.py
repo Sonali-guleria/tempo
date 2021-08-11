@@ -35,6 +35,12 @@ class TSDF:
       raise ValueError(f"Column {colname} not found in Dataframe")
     return colname
 
+  def __appendAnomalyClass1(self, freq, src_tab_name):
+      return(self.df.withColumn("anomaly_1", <compute>))
+
+  def appendAnomalyClass2(self, freq, src_tab_name):
+    return(self.df.withColumn("anomaly_1", <compute>))
+
   def __validated_columns(self,df,colnames):
     # if provided a string, treat it as a single column
     if type(colnames) == str:
@@ -445,7 +451,7 @@ class TSDF:
       enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
       return(enriched_tsdf)
     else:
-      return(self.resample_b(self, freq, func, metricCols, prefix))
+      return(self.resample_b(freq, func, metricCols, prefix))
 
   def resample_byof(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
     """
@@ -459,7 +465,7 @@ class TSDF:
       return(data)
 
   # Auxiliar functions
-  def equivalent_type(f):
+  def equivalent_type(self, f):
     if f == 'datetime64[ns]':
         return TimestampType()
     elif f == 'int64':
@@ -467,6 +473,8 @@ class TSDF:
     elif f == 'int32':
         return IntegerType()
     elif f == 'float64':
+        return FloatType()
+    elif f == 'float32':
         return FloatType()
     else:
         return StringType()
@@ -485,10 +493,9 @@ class TSDF:
     p_schema = StructType(struct_list)
     return p_schema
 
-  def resample_b(self, freq, func = id, metricCols = None, prefix = None):
+  def resample_b(self, freq, func, metricCols = None, prefix = None):
 
     ret_pdf = func(self.df.limit(1).toPandas())
-
     schema = self.pandas_to_spark(ret_pdf)
 
     custom_resample_func = func
@@ -498,14 +505,8 @@ class TSDF:
       This is the pandas udf that applied the custom function on group of data
       """
       x = df.columns
-      try:
-        df2 = df.set_index(ts)
-        df2 = custom_resample_func(df2)
-        df2 = df2.dropna()
-        df2.reset_index(inplace=True)
-      except Exception as e:
-        df2 = pd.DataFrame(columns=x)
-        df2 = df2.append({'Result': f"{e.__class__.__name__}: {e}"}, ignore_index=True)
+      df2 = custom_resample_func(df)
+      df2 = df2.dropna()
       return(df2)
 
     agg_window = f.window(f.col(self.ts_col),freq )

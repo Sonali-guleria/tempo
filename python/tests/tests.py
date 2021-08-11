@@ -450,9 +450,31 @@ class ResampleTest(SparkTest):
         # should be equal to the expected dataframe
         self.assertDataFramesEqual(featured_df, dfExpected)
         self.assertDataFramesEqual(resample_30m, expected_30s_df)
-
         #test bars summary
         self.assertDataFramesEqual(bars, barsExpected)
+
+
+        def my_func(data):
+          """
+          This is the custom function you want to execute on the minute bars
+          """
+          # data - has only 1 minute worth of data
+          import pandas as pd
+          data_agg = pd.DataFrame()
+
+          # append columns to an empty DataFrame
+          data_agg['symbol'] = [data["symbol"].iloc[0]]
+          data_agg['event_ts'] = [data["event_ts"].iloc[0]]
+          data_agg['trade_pr'] = [(data["trade_pr"]).sum().round(3)]
+          data_agg['tPrice'] = [(data["trade_pr"].mean()).round(3)]
+
+          return(data_agg)
+
+        tsdf_left = TSDF(df.select('symbol', 'event_ts', 'trade_pr'), partition_cols=["symbol"])
+
+        custom_bars = tsdf_left.resample(freq='1 minute', func = my_func)
+        custom_bars.show(10, False)
+
 
 class DeltaWriteTest(SparkTest):
 
