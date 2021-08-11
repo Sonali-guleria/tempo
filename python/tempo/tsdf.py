@@ -1,8 +1,10 @@
 import pyspark.sql.functions as f
 from pyspark.sql.window import Window
+from pyspark.sql.types import *
 import tempo.resample as rs
 import tempo.io as tio
 import pandas as pd
+
 
 class TSDF:
 
@@ -437,9 +439,13 @@ class TSDF:
     :param func: function used to aggregate input
     :return: TSDF object with sample data using aggregate function
     """
-    rs.validateFuncExists(func)
-    enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
-    return(enriched_tsdf)
+
+    if ((func is not None) & (isinstance(func, str))) | (func is None):
+      rs.validateFuncExists(func)
+      enriched_tsdf = rs.aggregate(self, freq, func, metricCols, prefix)
+      return(enriched_tsdf)
+    else:
+      return(self.resample_b(self, freq, func, metricCols, prefix))
 
   def resample_byof(self, freq, func=None, metricCols = None, prefix=None, byof_schema= None):
     """
@@ -449,10 +455,42 @@ class TSDF:
     :return: TSDF object with sample data using aggregate function
     """
 
-    ## handle below
-    if byof_schema is None:
-      byof_schema = self.df.schema
-    
+  def id(data):
+      return(data)
+
+  # Auxiliar functions
+  def equivalent_type(f):
+    if f == 'datetime64[ns]':
+        return TimestampType()
+    elif f == 'int64':
+        return LongType()
+    elif f == 'int32':
+        return IntegerType()
+    elif f == 'float64':
+        return FloatType()
+    else:
+        return StringType()
+
+  def define_structure(self, cname, format_type):
+    typo = self.equivalent_type(format_type)
+    return StructField(cname, typo)
+
+  # Given pandas dataframe, it will return a spark's dataframe.
+  def pandas_to_spark(self, pandas_df):
+    columns = list(pandas_df.columns)
+    types = list(pandas_df.dtypes)
+    struct_list = []
+    for column, typo in zip(columns, types):
+        struct_list.append(self.define_structure(column, typo))
+    p_schema = StructType(struct_list)
+    return p_schema
+
+  def resample_b(self, freq, func = id, metricCols = None, prefix = None):
+
+    ret_pdf = func(self.df.limit(1).toPandas())
+
+    schema = self.pandas_to_spark(ret_pdf)
+
     custom_resample_func = func
     ts = self.ts_col
     def resampling_inner(df):
@@ -473,11 +511,8 @@ class TSDF:
     agg_window = f.window(f.col(self.ts_col),freq )
     df = self.df.drop_duplicates()
     new_df = df.withColumn(ts, agg_window).withColumn(ts, f.col(ts).start)
-    result = new_df.groupBy(self.partitionCols+[ts]).applyInPandas(resampling_inner,schema = byof_schema)
+    result = new_df.groupBy(self.partitionCols+[ts]).applyInPandas(resampling_inner,schema = schema)
     return(result)
-
-  
-
 
   def calc_bars(tsdf, freq, func = None, metricCols = None):
 
