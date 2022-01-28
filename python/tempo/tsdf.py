@@ -92,6 +92,7 @@ class TSDF:
       ts_col = ''.join([prefix, self.ts_col])
       seq_col = ''.join([prefix, self.sequence_col]) if self.sequence_col else self.sequence_col
     return TSDF(df, ts_col, self.partitionCols, sequence_col=seq_col)
+  
 
   def __addColumnsFromOtherDF(self, other_cols):
     """
@@ -315,7 +316,7 @@ class TSDF:
     :param tsPartitionVal - value to break up each partition into time brackets
     :param fraction - overlap fraction
     :param skipNulls - whether to skip nulls when joining in values
-    """
+"""
 
     # first block of logic checks whether a standard range join will suffice
     left_df = self.df
