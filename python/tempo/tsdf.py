@@ -78,12 +78,12 @@ class TSDF:
     """
     Add prefix to all specified columns.
     """
+
     if prefix != '':
         prefix = prefix + '_'
 
     df = reduce(lambda df, idx: df.withColumnRenamed(col_list[idx], ''.join([prefix, col_list[idx]])),
                 range(len(col_list)), self.df)
-
 
     if prefix == '':
       ts_col = self.ts_col
@@ -91,6 +91,12 @@ class TSDF:
     else:
       ts_col = ''.join([prefix, self.ts_col])
       seq_col = ''.join([prefix, self.sequence_col]) if self.sequence_col else self.sequence_col
+    
+    if any(part in col_list for part in self.partitionCols):
+      old_part = self.partitionCols
+      new_cols = df.columns
+      self.partitionCols = [new for old in old_part for new in new_cols if old in new]  
+
     return TSDF(df, ts_col, self.partitionCols, sequence_col=seq_col)
 
   def __addColumnsFromOtherDF(self, other_cols):
