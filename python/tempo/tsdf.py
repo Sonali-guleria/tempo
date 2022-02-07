@@ -94,10 +94,19 @@ class TSDF:
     if any(part in col_list for part in self.partitionCols):
       old_part = self.partitionCols
       new_cols = df.columns
+<<<<<<< HEAD
       new_partitionCols = [new for old in old_part for new in new_cols if old in new]
     else:
       new_partitionCols  = self.partitionCols
     return TSDF(df, ts_col, new_partitionCols, sequence_col=seq_col)
+=======
+      self.partitionCols = [new for old in old_part for new in new_cols if old in new]  
+
+    return TSDF(df, ts_col, self.partitionCols, sequence_col=seq_col)
+
+
+  
+>>>>>>> 408f0c9eefcd73742ab6dd667fd9000b58941385
 
   def __addColumnsFromOtherDF(self, other_cols):
     """
@@ -321,6 +330,7 @@ class TSDF:
     :param tsPartitionVal - value to break up each partition into time brackets
     :param fraction - overlap fraction
     :param skipNulls - whether to skip nulls when joining in values
+<<<<<<< HEAD
     :param write_mode - optional mode (default-"append"),For streaming joins
     :param target_table- optional (necessary for streaming workloads)
     :param target_path - optional path for target table location
@@ -341,11 +351,22 @@ class TSDF:
       right = right_tsdf.__addPrefixToColumns(right_tsdf.df.columns, right_prefix)
 
       def streamingAsOfJoin(left, right):
+=======
+    """
+    
+    if self.df.isStreaming and right_tsdf.df.isStreaming:
+      right_tsdf = right_tsdf.__addPrefixToColumns(right_tsdf.df.columns, right_prefix)
+      left_tsdf = ((self.__addPrefixToColumns(left_tsdf.df.columns, left_prefix))
+                   if left_prefix is not None else self)
+
+      def streamingASOFJoin(left, right):
+>>>>>>> 408f0c9eefcd73742ab6dd667fd9000b58941385
         left_cols = ['Left.'+r for r in left.partitionCols]
         right_cols = ['Right.'+r for r in right.partitionCols]
         join_condition = ' And '.join('='.join(x) for x in zip(left_cols,right_cols))
         join_condition += ' AND {} >= {}'.format(left.ts_col,right.ts_col)
         joined_df = left.df.alias("left").join(right.df.alias("Right"), f.expr("""{}""".format(join_condition)), how="leftOuter")
+<<<<<<< HEAD
         joined_df = joined_df.drop(*right.partitionCols)
         #joined_df_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
         return(joined_df)
@@ -389,6 +410,17 @@ class TSDF:
       logger.error("Static-stream join is not available yet.")
       raise TypeError("Static-stream join is not available yet.") 
       
+=======
+        joined_df_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
+        return(joined_df_tsdf)
+
+      joined_df_tsdf = streamingASOFJoin(left_tsdf, right_tsdf)
+      return(joined_df_tsdf)
+      
+    elif any([not self.df.isStreaming, not right_tsdf.df.isStreaming]):
+      logger.error("Static-stream join is not available yet.")
+      raise TypeError("Static-stream join is not available yet.") 
+>>>>>>> 408f0c9eefcd73742ab6dd667fd9000b58941385
     else:
       # first block of logic checks whether a standard range join will suffice
       left_df = self.df
@@ -408,20 +440,33 @@ class TSDF:
         partition_cols = right_tsdf.partitionCols
         left_cols = list(set(left_df.columns).difference(set(self.partitionCols)))
         right_cols = list(set(right_df.columns).difference(set(right_tsdf.partitionCols)))
+<<<<<<< HEAD
 
         left_prefix = ('' if ((left_prefix is None) | (left_prefix == '')) else left_prefix + '_')
         right_prefix = ('' if ((right_prefix is None) | (right_prefix == '')) else right_prefix + '_')
 
         w = Window.partitionBy(*partition_cols).orderBy(right_prefix + right_tsdf.ts_col)
 
+=======
+        new_left_cols = left_cols
+
+        w = Window.partitionBy(*partition_cols).orderBy(right_prefix + right_tsdf.ts_col)
+>>>>>>> 408f0c9eefcd73742ab6dd667fd9000b58941385
         new_left_ts_col = left_prefix + self.ts_col
         new_left_cols = [f.col(c).alias(left_prefix + c) for c in left_cols] + partition_cols
         new_right_cols = [f.col(c).alias(right_prefix + c) for c in right_cols] + partition_cols
         quotes_df_w_lag = right_df.select(*new_right_cols).withColumn("lead_" + right_tsdf.ts_col, f.lead(right_prefix + right_tsdf.ts_col).over(w))
+<<<<<<< HEAD
         left_df = left_df.select(*new_left_cols)
         res = left_df.join(quotes_df_w_lag, partition_cols).where(left_df[new_left_ts_col].between(f.col(right_prefix + right_tsdf.ts_col), f.coalesce(f.col('lead_' + right_tsdf.ts_col), f.lit('2099-01-01').cast("timestamp")))).drop('lead_' + right_tsdf.ts_col)
         return(TSDF(res, partition_cols=self.partitionCols, ts_col=new_left_ts_col))
 
+=======
+        quotes_df_w_lag_tsdf = TSDF(quotes_df_w_lag, partition_cols=right_tsdf.partitionCols, ts_col= right_prefix + right_tsdf.ts_col)
+        left_df = left_df.select(*new_left_cols)
+        res = left_df.join(quotes_df_w_lag, partition_cols).where(left_df[new_left_ts_col].between(f.col(right_prefix + right_tsdf.ts_col), f.coalesce(f.col('lead_' + right_tsdf.ts_col), f.lit('2099-01-01').cast("timestamp")))).drop('lead_' + right_tsdf.ts_col)
+        return(TSDF(res, partition_cols=self.partitionCols, ts_col=new_left_ts_col))
+>>>>>>> 408f0c9eefcd73742ab6dd667fd9000b58941385
       # end of block checking to see if standard Spark SQL join will work
 
       if (tsPartitionVal is not None):
