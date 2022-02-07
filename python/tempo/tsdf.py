@@ -308,7 +308,7 @@ class TSDF:
         pass
 
 
-  def asofJoin(self, right_tsdf, spark,left_prefix=None, right_prefix="right", tsPartitionVal=None, fraction=0.5, skipNulls=True, sql_join_opt=False,write_mode="append", target_table= None, target_path = None , options = None):
+  def asofJoin(self, right_tsdf,left_prefix=None, right_prefix="right", tsPartitionVal=None, fraction=0.5, skipNulls=True, sql_join_opt=False,write_mode="append", target_table= None, target_path = None , options = None):
     """
     Performs an as-of join between two time-series. If a tsPartitionVal is specified, it will do this partitioned by
     time brackets, which can help alleviate skew.
