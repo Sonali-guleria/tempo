@@ -1,6 +1,7 @@
 import logging
 from functools import reduce
 from typing import List
+import re
 
 import numpy as np
 import pyspark.sql.functions as f
@@ -308,7 +309,7 @@ class TSDF:
         pass
 
 
-  def asofJoin(self, right_tsdf,left_prefix=None, right_prefix="right", tsPartitionVal=None, fraction=0.5, skipNulls=True, sql_join_opt=False,write_mode="append", target_table= None, target_path = None , options = None):
+  def asofJoin(self,right_tsdf,left_prefix=None, right_prefix="right", tsPartitionVal=None, fraction=0.5, skipNulls=True, sql_join_opt=False,write_mode="append", interim_table= None, interim_path = None , options = {}):
     """
     Performs an as-of join between two time-series. If a tsPartitionVal is specified, it will do this partitioned by
     time brackets, which can help alleviate skew.
@@ -322,8 +323,8 @@ class TSDF:
     :param fraction - overlap fraction
     :param skipNulls - whether to skip nulls when joining in values
     :param write_mode - optional mode (default-"append"),For streaming joins
-    :param target_table- optional (necessary for streaming workloads)
-    :param target_path - optional path for target table location
+    :param interim_table- optional (necessary for streaming workloads)
+    :param interim_path - optional path for target table location
     :param options- optional for providing any additional options for writeStream such as checkpointLocation
     """
 
@@ -335,11 +336,28 @@ class TSDF:
     self.__validateTsColMatch(right_tsdf)
     
     if self.df.isStreaming and right_tsdf.df.isStreaming:
-      #spark = SparkSession.builder.appName("myStreamingApp").enableHiveSupport().getOrCreate()
+      spark = SparkSession.builder.appName("myStreamingApp").enableHiveSupport().getOrCreate()
+      left_interval = re.search('EventTimeWatermark(.+?)\n', self.df._jdf.queryExecution().toString())
+      right_interval = re.search('EventTimeWatermark(.+?)\n', right_tsdf.df._jdf.queryExecution().toString())
+      if left_interval:
+        left_interval = left_interval.group(1).split(", ")[1]
+        self.df = self.df.withWatermark(self.ts_col,left_interval)
+      else:
+        left_interval = "1 minute"
+        self.df = self.df.withWatermark(self.ts_col,"1 minute") # adding a default watermark if user hasnt provided one
+      if(right_interval):
+        right_interval = right_interval.group(1).split(", ")[1]
+        right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col,right_interval)
+      else:
+        right_interval = "1 minute"
+        right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col,"1 minute")
+       
       left = ((self.__addPrefixToColumns(self.df.columns, left_prefix))
                    if left_prefix is not None else self)
       right = right_tsdf.__addPrefixToColumns(right_tsdf.df.columns, right_prefix)
-
+      cmp_sql = "SELECT CAST('1990-11-19' AS DATE) + INTERVAL {left_interval} >= CAST('1990-11-19' AS DATE) + INTERVAL {right_interval}".format(left_interval=left_interval,right_interval=right_interval)
+      watermark_threshold = spark.sql(cmp_sql).collect()[0][0]
+      watermark_threshold = right_interval if watermark_threshold else left_interval
       def streamingAsOfJoin(left, right):
         left_cols = ['Left.'+r for r in left.partitionCols]
         right_cols = ['Right.'+r for r in right.partitionCols]
@@ -349,41 +367,24 @@ class TSDF:
         joined_df = joined_df.drop(*right.partitionCols)
         #joined_df_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
         return(joined_df)
-
       joined_df = streamingAsOfJoin(left, right)
+      #writer = reduce(lambda x, y: x.option(y[0], y[1]), options.items(), joined_df.writeStream.queryName("Interim_Results"))
+      if not interim_table:
+        logger.warning("You did not provide interim_table(default: interim_results). This is not necessary but highly recommended as streaming interim results will be stored in this table. You can also provide additional options.")
+        interim_table = "interim_results"
+      joined_df.writeStream.options(**options).queryName("Interim_Results").toTable(interim_table)
+      #self.sequence_col 
       group_cols = left.partitionCols + [left.ts_col]
+      if self.sequence_col:
+        group_cols + [self.sequence_col]
       struct_cols = [x for x in joined_df.columns if x not in ([right.ts_col]+group_cols)]
-      #group_cols = ','.join(map(str,group_cols))
       struct_cols_s = ','.join(map(str,struct_cols))
       max_ts = right.ts_col
-
-      def dropDuplicatedRight(df,epoch):
-        df = df.withColumn("batch_id", f.lit(epoch))
-        joined_df_dedup = df.groupBy(group_cols).agg(f.max(max_ts).alias(max_ts),f.expr("max_by(struct({struct_cols}),{max_ts}) as struct_cols".format(struct_cols=struct_cols_s,max_ts=max_ts)))
-        joined_df_dedup =  joined_df_dedup.select(group_cols+[max_ts]+["struct_cols.*"])
-        #joined_df_dedup = TSDF(joined_df_dedup,self.partitionCols,self.ts_col) cant use this for now as .write is only overwrite
-        if target_table:
-          if target_path:
-            joined_df_dedup.write.mode(write_mode).option("path",target_path).saveAsTable(target_table)
-          else:
-            joined_df_dedup.write.mode(write_mode).saveAsTable(target_table)
-        else:
-          raise ValueError("For streaming target_table can not be empty. Please provide target table location")
-          #target_path = os.getcwd()+"/joined"
-          #joined_df_dedup.write.mode(write_mode).save(target_path)
-        return joined_df_dedup        
-
-      if options:
-        writer = reduce(lambda x, y: x.option(y[0], y[1]), options.items(), joined_df.writeStream)
-        writer.foreachBatch(dropDuplicatedRight).start()
-      else:
-        joined_df.writeStream.foreachBatch(dropDuplicatedRight).start()
-      
-      #joined_df_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
-      #x = spark.table(target_table)
-
-      joined_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
-      return(joined_tsdf)
+      joined_df = spark.readStream.table(interim_table).withWatermark(left.ts_col,watermark_threshold) #make it readStream  spark.read.stream
+      joined_df_dedup = joined_df.groupBy(group_cols).agg(f.max(max_ts).alias(max_ts),f.expr("max_by(struct({struct_cols}),{max_ts}) as struct_cols".format(struct_cols=struct_cols_s,max_ts=max_ts)))
+      joined_df_dedup =  joined_df_dedup.select(group_cols+[max_ts]+["struct_cols.*"])
+      joined_df_dedup = TSDF(joined_df_dedup,partition_cols =left.partitionCols,ts_col=left.ts_col) 
+      return(joined_df_dedup)
 
     elif any([(not self.df.isStreaming and right_tsdf.df.isStreaming),(self.df.isStreaming and not right_tsdf.df.isStreaming)]):
       logger.error("Static-stream join is not available yet.")
@@ -423,7 +424,6 @@ class TSDF:
         return(TSDF(res, partition_cols=self.partitionCols, ts_col=new_left_ts_col))
 
       # end of block checking to see if standard Spark SQL join will work
-
       if (tsPartitionVal is not None):
         logger.warning("You are using the skew version of the AS OF join. This may result in null values if there are any values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum lookback, trading off performance and potential blank AS OF values for sparse keys")
 
@@ -634,8 +634,8 @@ class TSDF:
 
           return TSDF(summary_df, self.ts_col, self.partitionCols)
 
-  def write(self, spark, tabName, optimizationCols = None):
-    tio.write(self, spark, tabName, optimizationCols)
+  def write(self, spark, table_name, optimization_cols = None, mode = "overwrite", options = {}, table_format = "delta"):
+    tio.write(self, spark, table_name, optimization_cols, mode, options, table_format)
 
   def resample(self, freq, func=None, metricCols = None, prefix=None, fill = None):
     """
