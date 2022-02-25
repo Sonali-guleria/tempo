@@ -21,20 +21,18 @@ def write(tsdf, spark, table_name, optimization_cols = None, mode = "append", op
   df = tsdf.df
   ts_col = tsdf.ts_col
   partitionCols = tsdf.partitionCols
-  if optimization_cols:
-     optimization_cols = optimization_cols + ['event_time']
-  else:
-     optimization_cols = ['event_time']
-
-
-  useDeltaOpt = (os.getenv('DATABRICKS_RUNTIME_VERSION') != None)
-  
-  view_df = df.withColumn("event_dt", f.to_date(f.col(ts_col))) \
+  view_df = tsdf.df.withColumn("event_dt", f.to_date(f.col(ts_col))) \
       .withColumn("event_time", f.translate(f.split(f.col(ts_col).cast("string"), ' ')[1], ':', '').cast("double"))
-  view_cols = deque(view_df.columns)
-  view_cols.rotate(1)
-  view_df = view_df.select(*list(view_cols))
+
   if not view_df.isStreaming:
+    if optimization_cols:
+       optimization_cols = optimization_cols + ['event_time']
+    else:
+       optimization_cols = ['event_time']
+    useDeltaOpt = (os.getenv('DATABRICKS_RUNTIME_VERSION') != None)
+    view_cols = deque(view_df.columns)
+    view_cols.rotate(1)
+    view_df = view_df.select(*list(view_cols))
     view_df.write.mode(mode).partitionBy("event_dt").options(**options).saveAsTable(table_name)
     if useDeltaOpt:
         try:
