@@ -6,6 +6,7 @@ from functools import reduce
 from typing import List, Union, Callable, Optional, Sequence
 
 import numpy as np
+import re
 import pyspark.sql.functions as f
 from IPython.core.display import HTML
 from IPython.display import display as ipydisplay
@@ -24,6 +25,7 @@ from tempo.utils import (
     calculate_time_horizon,
     get_display_df,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +184,7 @@ class TSDF:
           new_partitionCols = [new for old in old_part for new in new_cols if old in new]
         else:
           new_partitionCols  = self.partitionCols
-      
+
         return TSDF(df, ts_col, self.partitionCols, sequence_col=seq_col)
 
     def __addColumnsFromOtherDF(self, other_cols: Sequence[str]):
@@ -792,9 +794,6 @@ class TSDF:
         elif any([(not self.df.isStreaming and right_tsdf.df.isStreaming),(self.df.isStreaming and not right_tsdf.df.isStreaming)]):
           logger.error("Static-stream join is not available yet.")
           raise TypeError("Static-stream join is not available yet.") 
-
-
-
         else:
 
             # first block of logic checks whether a standard range join will suffice
@@ -859,22 +858,9 @@ class TSDF:
                 )
                 return TSDF(res, partition_cols=self.partitionCols, ts_col=new_left_ts_col)
 
-            # end of block checking to see if standard Spark SQL join will work
-
-            if tsPartitionVal is not None:
-                logger.warning(
-                    "You are using the skew version of the AS OF join. This may result in null values if there are any values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum lookback, trading off performance and potential blank AS OF values for sparse keys"
-                )
-
-            # Check whether partition columns have same name in both dataframes
-            self.__checkPartitionCols(right_tsdf)
-
             # prefix non-partition columns, to avoid duplicated columns.
             left_df = self.df
             right_df = right_tsdf.df
-
-            # validate timestamp datatypes match
-            self.__validateTsColMatch(right_tsdf)
 
             orig_left_col_diff = list(
                 set(left_df.columns).difference(set(self.partitionCols))
