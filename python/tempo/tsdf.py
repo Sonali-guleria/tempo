@@ -1277,7 +1277,13 @@ class TSDF:
         trigger_options={},
     ):
         tio.write(
-            self, spark, table_name, optimization_cols, mode, options, trigger_options
+            self,
+            spark=spark,
+            table_name=table_name,
+            optimization_cols=optimization_cols,
+            mode=mode,
+            options=options,
+            trigger_options=trigger_options,
         )
 
     def resample(
