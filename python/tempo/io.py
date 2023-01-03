@@ -48,12 +48,6 @@ def write(
         view_cols.rotate(1)
         view_df = view_df.select(*list(view_cols))
 
-        view_df = df.withColumn(
-            "event_time",
-            f.translate(f.split(f.col(ts_col).cast("string"), " ")[1], ":", "").cast(
-                "double"
-            ),
-        )
         view_cols = deque(view_df.columns)
         view_cols.rotate(1)
         view_df = view_df.select(*list(view_cols))
