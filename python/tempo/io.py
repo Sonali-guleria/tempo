@@ -28,7 +28,7 @@ def write(
     # hilbert curves more evenly distribute performance for querying multiple columns for Delta tables
     spark.conf.set("spark.databricks.io.skipping.mdc.curve", "hilbert")
 
-    df = tsdf.df
+    tsdf.df
     ts_col = tsdf.ts_col
     partitionCols = tsdf.partitionCols
     view_df = tsdf.df.withColumn("event_dt", f.to_date(f.col(ts_col))).withColumn(
