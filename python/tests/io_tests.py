@@ -37,7 +37,7 @@ class DeltaWriteTest(SparkTest):
         self.assertEqual(self.spark.table(table_name).count(), 7)
 
     def test_write_to_delta_non_dbr_environment_logging(self):
-        """Test logging when writing"""
+        """Test logging when writing, not valid anymore."""
 
         table_name = "my_table_optimization_col"
 
