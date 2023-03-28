@@ -1600,8 +1600,7 @@ class TSDF:
 
         # Get previous timestamp to identify start time of the interval
         data = data.withColumn(
-            "previous_ts",
-            f.lag(f.col(self.ts_col), offset=1).over(w),
+            "previous_ts", f.lag(f.col(self.ts_col), offset=1).over(w)
         )
 
         # Determine state intervals using user-provided the state comparison function
@@ -1626,8 +1625,7 @@ class TSDF:
 
         # Count the distinct state changes to get the unique intervals
         data = data.withColumn(
-            "state_incrementer",
-            f.sum(f.col("state_change").cast("int")).over(w),
+            "state_incrementer", f.sum(f.col("state_change").cast("int")).over(w)
         ).filter(~f.col("state_change"))
 
         # Find the start and end timestamp of the interval

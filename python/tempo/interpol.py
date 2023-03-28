@@ -96,11 +96,7 @@ class Interpolation:
         return interpolated.select(*df.columns)
 
     def __interpolate_column(
-        self,
-        series: DataFrame,
-        ts_col: str,
-        target_col: str,
-        method: str,
+        self, series: DataFrame, ts_col: str, target_col: str, method: str
     ) -> DataFrame:
         """
         Apply interpolation to column.
@@ -175,11 +171,7 @@ class Interpolation:
 
         # Handle linear fill
         if method == "linear":
-            output_df = self.__calc_linear_spark(
-                output_df,
-                ts_col,
-                target_col,
-            )
+            output_df = self.__calc_linear_spark(output_df, ts_col, target_col)
 
         return output_df
 
@@ -193,7 +185,7 @@ class Interpolation:
         :param partition_cols: partition column names
         :param ts_col: timestamp column name
         """
-        return df.withColumn("previous_timestamp", col(ts_col),).withColumn(
+        return df.withColumn("previous_timestamp", col(ts_col)).withColumn(
             "next_timestamp",
             lead(df[ts_col]).over(Window.partitionBy(*partition_cols).orderBy(ts_col)),
         )
