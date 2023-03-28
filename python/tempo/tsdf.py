@@ -710,7 +710,6 @@ class TSDF:
         skipNulls=True,
         sql_join_opt=False,
         suppress_null_warning=False,
-        write_mode="append",
         interim_table=None,
         options={},
     ):
@@ -730,6 +729,9 @@ class TSDF:
         :param skipNulls - whether to skip nulls when joining in values
         :param sql_join_opt - if set to True, will use standard Spark SQL join if it is estimated to be efficient
         :param suppress_null_warning - when tsPartitionVal is specified, will collect min of each column and raise warnings about null values, set to True to avoid
+        :param interim_table- optional [to write streaming interim results]
+        :param options- optional for providing any additional options for writeStream such as checkpointLocation
+
         """
         if tsPartitionVal is not None:
             logger.warning(
