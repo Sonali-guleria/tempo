@@ -16,19 +16,21 @@ def write(
     spark: SparkSession,
     table_name: str,
     optimization_cols: list[str] = None,
-    mode="append",
-    options={},
-    trigger_options={},
+    mode: str = "append",
+    options: dict = {},
+    trigger_options: dict = {},
 ):
     """
     param: tsdf: input TSDF object to write
-    param: table_name Delta output table name
-    param: optimization_cols list of columns to optimize on (time)
+    param: table_name: Delta output table name
+    param: optimization_cols: list of columns to optimize on (time)
+    param: mode: write mode for delta. default: "Append"
+    param: options: Additional options for delta writes
+    param: trigger_options: The trigger settings of a streaming query define the timing of streaming data processing
     """
     # hilbert curves more evenly distribute performance for querying multiple columns for Delta tables
     spark.conf.set("spark.databricks.io.skipping.mdc.curve", "hilbert")
 
-    tsdf.df
     ts_col = tsdf.ts_col
     partitionCols = tsdf.partitionCols
     view_df = tsdf.df.withColumn("event_dt", f.to_date(f.col(ts_col))).withColumn(
@@ -72,6 +74,9 @@ def write(
         if "checkpointLocation" not in options:
             options["checkpointLocation"] = (
                 "/tmp/tempo/streaming_checkpoints/" + table_name
+            )
+            logger.warning(
+                "No checkpoint location provided in options. Using: /tmp/tempo/streaming_checkpoints/"
             )
         if trigger_options:
             view_df.writeStream.trigger(**trigger_options).partitionBy(
