@@ -1,7 +1,7 @@
-import pyspark.sql.functions as f
-from pyspark.sql.utils import AnalysisException
 from tempo.intervals import *
 from tests.tsdf_tests import SparkTest
+from pyspark.sql.utils import AnalysisException
+import pyspark.sql.functions as f
 
 
 class IntervalsDFTests(SparkTest):

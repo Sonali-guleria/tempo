@@ -262,9 +262,9 @@ packages for this project, like so:
 
 `python -m venv <path to project root>/venv`
 
-Then, install the required modules via pip:
+You can then install the required modules via pip:
 
-`pip install -r requirements.txt`
+`pip install requirements.txt`
 
 ## Building the Project
 Once in the main project folder, build into a wheel using the following command: 

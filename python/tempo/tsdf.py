@@ -710,6 +710,7 @@ class TSDF:
         skipNulls=True,
         sql_join_opt=False,
         suppress_null_warning=False,
+        write_mode="append",
         interim_table=None,
         options={},
     ):
@@ -729,15 +730,10 @@ class TSDF:
         :param skipNulls - whether to skip nulls when joining in values
         :param sql_join_opt - if set to True, will use standard Spark SQL join if it is estimated to be efficient
         :param suppress_null_warning - when tsPartitionVal is specified, will collect min of each column and raise warnings about null values, set to True to avoid
-        :param interim_table- optional [to write streaming interim results]
-        :param options- optional for providing any additional options for writeStream such as checkpointLocation
-
         """
         if tsPartitionVal is not None:
             logger.warning(
-                "You are using the skew version of the AS OF join. This may result in null values if there are any "
-                "values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum "
-                "lookback, trading off performance and potential blank AS OF values for sparse keys "
+                "You are using the skew version of the AS OF join. This may result in null values if there are any values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum lookback, trading off performance and potential blank AS OF values for sparse keys"
             )
         # Check whether partition columns have same name in both dataframes
         self.__checkPartitionCols(right_tsdf)
@@ -761,17 +757,17 @@ class TSDF:
                 left_interval = left_interval.group(1).split(", ")[1]
                 # self.df = self.df.withWatermark(self.ts_col,left_interval)
             else:
-                left_interval = "10 minutes"
+                left_interval = "1 minute"
                 self.df = self.df.withWatermark(
-                    self.ts_col, left_interval
-                )  # adding a default watermark if user did not provided one
+                    self.ts_col, "1 minute"
+                )  # adding a default watermark if user hasnt provided one
             if right_interval:
                 right_interval = right_interval.group(1).split(", ")[1]
                 # right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col,right_interval)
             else:
-                right_interval = "10 minutes"
-                right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col, right_interval)
-            cmp_sql = "SELECT current_date() + INTERVAL {left_interval} >= current_date() + INTERVAL {right_interval}".format(
+                right_interval = "1 minute"
+                right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col, "1 minute")
+            cmp_sql = "SELECT CAST('1990-11-19' AS DATE) + INTERVAL {left_interval} >= CAST('1990-11-19' AS DATE) + INTERVAL {right_interval}".format(
                 left_interval=left_interval, right_interval=right_interval
             )
             watermark_threshold = spark.sql(cmp_sql).collect()[0][0]
@@ -810,16 +806,10 @@ class TSDF:
             # writer = reduce(lambda x, y: x.option(y[0], y[1]), options.items(), joined_df.writeStream.queryName("Interim_Results"))
             if not interim_table:
                 logger.warning(
-                    "You did not provide interim_table(default: interim_results). This is not necessary but "
-                    "recommended as streaming interim results will be stored in this table. You can also provide "
-                    "additional options. "
+                    "You did not provide interim_table(default: interim_results). This is not necessary but recommended as streaming interim results will be stored in this table. You can also provide additional options."
                 )
                 interim_table = "interim_results"
             if "checkpointLocation" not in options:
-                logger.warning(
-                    "You did not provide Checkpoint location (default: /tmp/tempo/streaming_checkpoints/{"
-                    "interim_table}) "
-                )
                 options["checkpointLocation"] = (
                     "/tmp/tempo/streaming_checkpoints/" + interim_table
                 )
@@ -1600,7 +1590,8 @@ class TSDF:
 
         # Get previous timestamp to identify start time of the interval
         data = data.withColumn(
-            "previous_ts", f.lag(f.col(self.ts_col), offset=1).over(w)
+            "previous_ts",
+            f.lag(f.col(self.ts_col), offset=1).over(w),
         )
 
         # Determine state intervals using user-provided the state comparison function
@@ -1625,7 +1616,8 @@ class TSDF:
 
         # Count the distinct state changes to get the unique intervals
         data = data.withColumn(
-            "state_incrementer", f.sum(f.col("state_change").cast("int")).over(w)
+            "state_incrementer",
+            f.sum(f.col("state_change").cast("int")).over(w),
         ).filter(~f.col("state_change"))
 
         # Find the start and end timestamp of the interval

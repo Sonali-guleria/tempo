@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from functools import cached_property
 from typing import Optional
+from functools import cached_property
 
-import pyspark.sql.functions as f
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.types import NumericType, BooleanType, StructField
+import pyspark.sql.functions as f
 from pyspark.sql.window import Window
 
 
@@ -204,8 +204,12 @@ class IntervalsDF:
         """
         for c in self.interval_boundaries + self.metric_columns:
             df = df.withColumn(
-                f"_lead_1_{c}", f.lead(c, 1).over(self.window)
-            ).withColumn(f"_lag_1_{c}", f.lag(c, 1).over(self.window))
+                f"_lead_1_{c}",
+                f.lead(c, 1).over(self.window),
+            ).withColumn(
+                f"_lag_1_{c}",
+                f.lag(c, 1).over(self.window),
+            )
 
         return df
 
@@ -233,7 +237,10 @@ class IntervalsDF:
 
         # NB: the first record cannot be a subset of the previous and
         # `lag` will return null for this record with no default set
-        df = df.fillna(False, subset=[subset_indicator])
+        df = df.fillna(
+            False,
+            subset=[subset_indicator],
+        )
 
         return df, subset_indicator
 
@@ -268,13 +275,19 @@ class IntervalsDF:
             )
 
             overlap_indicators.extend(
-                (f"_lead_1_{ts}_overlaps", f"_lag_1_{ts}_overlaps")
+                (
+                    f"_lead_1_{ts}_overlaps",
+                    f"_lag_1_{ts}_overlaps",
+                )
             )
 
         # NB: the first and last record cannot be a subset of the previous and
         # next respectively. `lag` will return null for this record with no
         # default set.
-        df = df.fillna(False, subset=overlap_indicators)
+        df = df.fillna(
+            False,
+            subset=overlap_indicators,
+        )
 
         return df, overlap_indicators
 
@@ -367,7 +380,10 @@ class IntervalsDF:
             + "ELSE null END "
         )
 
-        df = df.withColumn(new_boundary_col, f.expr(new_interval_boundaries))
+        df = df.withColumn(
+            new_boundary_col,
+            f.expr(new_interval_boundaries),
+        )
 
         if how == "left":
 

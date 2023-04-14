@@ -1,8 +1,11 @@
 import unittest
 
+from pyspark.sql.types import *
+
 from tempo.interpol import Interpolation
 from tempo.tsdf import TSDF
 from tempo.utils import *
+
 from tests.tsdf_tests import SparkTest
 
 
