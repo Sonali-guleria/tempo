@@ -757,19 +757,17 @@ class TSDF:
                 left_interval = left_interval.group(1).split(", ")[1]
                 # self.df = self.df.withWatermark(self.ts_col,left_interval)
             else:
-                left_interval = "1 minute"
+                left_interval = "10 minutes"
                 self.df = self.df.withWatermark(
-                    self.ts_col, "1 minute"
-                )  # adding a default watermark if user hasnt provided one
+                    self.ts_col, left_interval
+                )  # adding a default watermark if user did not provide one
             if right_interval:
                 right_interval = right_interval.group(1).split(", ")[1]
                 # right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col,right_interval)
             else:
-                right_interval = "1 minute"
-                right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col, "1 minute")
-            cmp_sql = "SELECT CAST('1990-11-19' AS DATE) + INTERVAL {left_interval} >= CAST('1990-11-19' AS DATE) + INTERVAL {right_interval}".format(
-                left_interval=left_interval, right_interval=right_interval
-            )
+                right_interval = "10 minutes"
+                right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col, right_interval)
+            cmp_sql = f"SELECT current_date + INTERVAL {left_interval} >= current_date + INTERVAL {right_interval}"
             watermark_threshold = spark.sql(cmp_sql).collect()[0][0]
             watermark_threshold = (
                 right_interval if watermark_threshold else left_interval
@@ -806,12 +804,18 @@ class TSDF:
             # writer = reduce(lambda x, y: x.option(y[0], y[1]), options.items(), joined_df.writeStream.queryName("Interim_Results"))
             if not interim_table:
                 logger.warning(
-                    "You did not provide interim_table(default: interim_results). This is not necessary but recommended as streaming interim results will be stored in this table. You can also provide additional options."
+                    "You did not provide interim_table(default: interim_results). This is not necessary but "
+                    "recommended as streaming interim results will be stored in this table. You can also provide "
+                    "additional options. "
                 )
                 interim_table = "interim_results"
             if "checkpointLocation" not in options:
                 options["checkpointLocation"] = (
                     "/tmp/tempo/streaming_checkpoints/" + interim_table
+                )
+                logger.warning(
+                    "You did not provide checkpoint location for the interim results in options. Using the default "
+                    "/tmp/tempo/streaming_checkpoints/{}".format(interim_table)
                 )
             joined_df.writeStream.options(**options).queryName(interim_table).toTable(
                 interim_table
@@ -1589,8 +1593,7 @@ class TSDF:
 
         # Get previous timestamp to identify start time of the interval
         data = data.withColumn(
-            "previous_ts",
-            f.lag(f.col(self.ts_col), offset=1).over(w),
+            "previous_ts", f.lag(f.col(self.ts_col), offset=1).over(w)
         )
 
         # Determine state intervals using user-provided the state comparison function
@@ -1615,8 +1618,7 @@ class TSDF:
 
         # Count the distinct state changes to get the unique intervals
         data = data.withColumn(
-            "state_incrementer",
-            f.sum(f.col("state_change").cast("int")).over(w),
+            "state_incrementer", f.sum(f.col("state_change").cast("int")).over(w)
         ).filter(~f.col("state_change"))
 
         # Find the start and end timestamp of the interval
