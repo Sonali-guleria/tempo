@@ -67,8 +67,8 @@ class DeltaWriteTest(SparkTest):
 
         # load test data
         input_tsdf = self.get_data_as_tsdf("input_data")
-
-        with self.assertLogs(level="ERROR") as error_captured:
+        logger = logging.Logger("test")
+        with self.assertLogs(logger, level="ERROR") as error_captured:
             # test write to delta
             input_tsdf.write(self.spark, table_name, ["date"])
 
