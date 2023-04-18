@@ -28,7 +28,7 @@ class SparkTest(unittest.TestCase):
         # create and configure PySpark Session
         cls.spark = (
             SparkSession.builder.appName("unit-tests")
-            .config("spark.jars.packages", "io.delta:delta-core_2.12:1.1.0")
+            .config("spark.jars.packages", "io.delta:delta-core_2.12:2.0.0")
             .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
             .config(
                 "spark.sql.catalog.spark_catalog",
