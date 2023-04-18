@@ -1,7 +1,8 @@
 import unittest
 
 from tests.base import SparkTest
-
+import pyspark.sql.functions as f
+from tempo import TSDF
 
 class AsOfJoinTest(SparkTest):
     def test_asof_join(self):
