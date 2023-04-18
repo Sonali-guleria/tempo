@@ -104,7 +104,27 @@ class AsOfJoinTest(SparkTest):
 
         # compare
         self.assertDataFrameEquality(joined_df, dfExpected)
+        
+    def test_streaming_asofJoin(self):
 
+        tsdf_left = self.get_data_as_tsdf("left")
+        tsdf_right = self.get_data_as_tsdf("right")
+
+        tsdf_left.write(self.spark, "left_ts_table", mode='overwrite')
+        tsdf_right.write(self.spark, "right_ts_table", mode='overwrite')
+
+        df_trades = self.spark.readStream.format("delta").table("left_ts_table").withColumn("event_ts", f.col("event_ts").cast("timestamp")).withWatermark("event_ts", "30 minutes")
+
+        df_quotes = self.spark.readStream.format('delta').table("right_ts_table").withColumn("event_ts", f.col("event_ts").cast("timestamp")).withWatermark("event_ts", "30 minutes")
+        left = TSDF(df_trades, partition_cols=['symbol'], ts_col='event_ts')
+        right = TSDF(df_quotes, partition_cols=['symbol'], ts_col='event_ts')
+        joined_df = left.asofJoin(right, interim_table='rp_interim_results3', options={'checkpointLocation': '/tmp/tempo/streaming_checkpoints/ii'})
+
+        joined_df.df.writeStream("test").format("memory").outputMode("append").start()
+        for x in range(5):
+            import time
+            self.spark.sql("select * from test").show()
+            time.sleep(10)
 
 # MAIN
 if __name__ == "__main__":
