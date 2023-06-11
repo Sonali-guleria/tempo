@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import operator
+import re
 from abc import ABCMeta, abstractmethod
 from functools import reduce
 from typing import Any, Callable, List, Optional, Sequence, TypeVar, Union
@@ -816,7 +817,7 @@ class TSDF:
                 join_condition += " AND {} >= {}".format(left.ts_col, right.ts_col)
                 joined_df = left.df.alias("left").join(
                     right.df.alias("Right"),
-                    f.expr("""{}""".format(join_condition)),
+                    sfn.expr("""{}""".format(join_condition)),
                     how="leftOuter",
                 )
                 joined_df = joined_df.drop(*right.partitionCols)
@@ -857,8 +858,8 @@ class TSDF:
                 left.ts_col, watermark_threshold
             )
             joined_df_dedup = joined_df.groupBy(group_cols).agg(
-                f.max(max_ts).alias(max_ts),
-                f.expr(
+                sfn.max(max_ts).alias(max_ts),
+                sfn.expr(
                     "max_by(struct({struct_cols}),{max_ts}) as struct_cols".format(
                         struct_cols=struct_cols_s, max_ts=max_ts
                     )
@@ -1366,7 +1367,7 @@ class TSDF:
         options: dict = {},
         triggerOptions: dict = {},
     ) -> None:
-        tio.write(
+        t_io.write(
             self,
             spark=spark,
             tabName=tabName,
