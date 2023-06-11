@@ -87,8 +87,7 @@ class TSDF:
                     sfn.when(
                         sfn.col(self.ts_col).contains("."),
                         sfn.concat(
-                            sfn.lit("0."),
-                            sfn.split(sfn.col(self.ts_col), r"\.")[1],
+                            sfn.lit("0."), sfn.split(sfn.col(self.ts_col), r"\.")[1]
                         ),
                     ).otherwise(0)
                 ).cast("double"),
@@ -758,7 +757,7 @@ class TSDF:
         :param suppress_null_warning - when tsPartitionVal is specified, will collect min of each column and raise warnings about null values, set to True to avoid
         :param tolerance - only join values within this tolerance range (inclusive), expressed in number of seconds as a double
         """
-        
+
         # Check whether partition columns have same name in both dataframes
         self.__checkPartitionCols(right_tsdf)
         # validate timestamp datatypes match
@@ -882,177 +881,184 @@ class TSDF:
             logger.error("Static-stream join is not available yet.")
             raise TypeError("Static-stream join is not available yet.")
         else:
-          # first block of logic checks whether a standard range join will suffice
-          left_df = self.df
-          right_df = right_tsdf.df
+            # first block of logic checks whether a standard range join will suffice
+            left_df = self.df
+            right_df = right_tsdf.df
 
-          # test if the broadcast join will be efficient
-          if sql_join_opt:
-              spark = SparkSession.builder.getOrCreate()
-              left_bytes = self.__getBytesFromPlan(left_df, spark)
-              right_bytes = self.__getBytesFromPlan(right_df, spark)
+            # test if the broadcast join will be efficient
+            if sql_join_opt:
+                spark = SparkSession.builder.getOrCreate()
+                left_bytes = self.__getBytesFromPlan(left_df, spark)
+                right_bytes = self.__getBytesFromPlan(right_df, spark)
 
-              # choose 30MB as the cutoff for the broadcast
-              bytes_threshold = 30 * 1024 * 1024
-              if (left_bytes < bytes_threshold) or (right_bytes < bytes_threshold):
-                  spark.conf.set("spark.databricks.optimizer.rangeJoin.binSize", 60)
-                  partition_cols = right_tsdf.partitionCols
-                  left_cols = list(set(left_df.columns) - set(self.partitionCols))
-                  right_cols = list(set(right_df.columns) - set(right_tsdf.partitionCols))
+                # choose 30MB as the cutoff for the broadcast
+                bytes_threshold = 30 * 1024 * 1024
+                if (left_bytes < bytes_threshold) or (right_bytes < bytes_threshold):
+                    spark.conf.set("spark.databricks.optimizer.rangeJoin.binSize", 60)
+                    partition_cols = right_tsdf.partitionCols
+                    left_cols = list(set(left_df.columns) - set(self.partitionCols))
+                    right_cols = list(
+                        set(right_df.columns) - set(right_tsdf.partitionCols)
+                    )
 
-                  left_prefix = (
-                      ""
-                      if ((left_prefix is None) | (left_prefix == ""))
-                      else left_prefix + "_"
-                  )
-                  right_prefix = (
-                      ""
-                      if ((right_prefix is None) | (right_prefix == ""))
-                      else right_prefix + "_"
-                  )
+                    left_prefix = (
+                        ""
+                        if ((left_prefix is None) | (left_prefix == ""))
+                        else left_prefix + "_"
+                    )
+                    right_prefix = (
+                        ""
+                        if ((right_prefix is None) | (right_prefix == ""))
+                        else right_prefix + "_"
+                    )
 
-                  w = Window.partitionBy(*partition_cols).orderBy(
-                      right_prefix + right_tsdf.ts_col
-                  )
+                    w = Window.partitionBy(*partition_cols).orderBy(
+                        right_prefix + right_tsdf.ts_col
+                    )
 
-                  new_left_ts_col = left_prefix + self.ts_col
-                  new_left_cols = [
-                      sfn.col(c).alias(left_prefix + c) for c in left_cols
-                  ] + partition_cols
-                  new_right_cols = [
-                      sfn.col(c).alias(right_prefix + c) for c in right_cols
-                  ] + partition_cols
-                  quotes_df_w_lag = right_df.select(*new_right_cols).withColumn(
-                      "lead_" + right_tsdf.ts_col,
-                      sfn.lead(right_prefix + right_tsdf.ts_col).over(w),
-                  )
-                  left_df = left_df.select(*new_left_cols)
-                  res = (
-                      left_df.join(quotes_df_w_lag, partition_cols)
-                      .where(
-                          left_df[new_left_ts_col].between(
-                              sfn.col(right_prefix + right_tsdf.ts_col),
-                              sfn.coalesce(
-                                  sfn.col("lead_" + right_tsdf.ts_col),
-                                  sfn.lit("2099-01-01").cast("timestamp"),
-                              ),
-                          )
-                      )
-                      .drop("lead_" + right_tsdf.ts_col)
-                  )
-                  return TSDF(
-                      res, partition_cols=self.partitionCols, ts_col=new_left_ts_col
-                  )
+                    new_left_ts_col = left_prefix + self.ts_col
+                    new_left_cols = [
+                        sfn.col(c).alias(left_prefix + c) for c in left_cols
+                    ] + partition_cols
+                    new_right_cols = [
+                        sfn.col(c).alias(right_prefix + c) for c in right_cols
+                    ] + partition_cols
+                    quotes_df_w_lag = right_df.select(*new_right_cols).withColumn(
+                        "lead_" + right_tsdf.ts_col,
+                        sfn.lead(right_prefix + right_tsdf.ts_col).over(w),
+                    )
+                    left_df = left_df.select(*new_left_cols)
+                    res = (
+                        left_df.join(quotes_df_w_lag, partition_cols)
+                        .where(
+                            left_df[new_left_ts_col].between(
+                                sfn.col(right_prefix + right_tsdf.ts_col),
+                                sfn.coalesce(
+                                    sfn.col("lead_" + right_tsdf.ts_col),
+                                    sfn.lit("2099-01-01").cast("timestamp"),
+                                ),
+                            )
+                        )
+                        .drop("lead_" + right_tsdf.ts_col)
+                    )
+                    return TSDF(
+                        res, partition_cols=self.partitionCols, ts_col=new_left_ts_col
+                    )
 
-          # end of block checking to see if standard Spark SQL join will work
+            # end of block checking to see if standard Spark SQL join will work
 
-          if tsPartitionVal is not None:
-              logger.warning(
-                  "You are using the skew version of the AS OF join. This may result in null values if there are any "
-                  "values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum "
-                  "lookback, trading off performance and potential blank AS OF values for sparse keys"
-              )
+            if tsPartitionVal is not None:
+                logger.warning(
+                    "You are using the skew version of the AS OF join. This may result in null values if there are any "
+                    "values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum "
+                    "lookback, trading off performance and potential blank AS OF values for sparse keys"
+                )
 
-          # prefix non-partition columns, to avoid duplicated columns.
-          left_df = self.df
-          right_df = right_tsdf.df
+            # prefix non-partition columns, to avoid duplicated columns.
+            left_df = self.df
+            right_df = right_tsdf.df
 
-          orig_left_col_diff = list(
-              set(left_df.columns).difference(set(self.partitionCols))
-          )
-          orig_right_col_diff = list(
-              set(right_df.columns).difference(set(self.partitionCols))
-          )
+            orig_left_col_diff = list(
+                set(left_df.columns).difference(set(self.partitionCols))
+            )
+            orig_right_col_diff = list(
+                set(right_df.columns).difference(set(self.partitionCols))
+            )
 
-          left_tsdf = (
-              (self.__addPrefixToColumns([self.ts_col] + orig_left_col_diff, left_prefix))
-              if left_prefix is not None
-              else self
-          )
-          right_tsdf = right_tsdf.__addPrefixToColumns(
-              [right_tsdf.ts_col] + orig_right_col_diff, right_prefix
-          )
+            left_tsdf = (
+                (
+                    self.__addPrefixToColumns(
+                        [self.ts_col] + orig_left_col_diff, left_prefix
+                    )
+                )
+                if left_prefix is not None
+                else self
+            )
+            right_tsdf = right_tsdf.__addPrefixToColumns(
+                [right_tsdf.ts_col] + orig_right_col_diff, right_prefix
+            )
 
-          left_nonpartition_cols = list(
-              set(left_tsdf.df.columns).difference(set(self.partitionCols))
-          )
-          right_nonpartition_cols = list(
-              set(right_tsdf.df.columns).difference(set(self.partitionCols))
-          )
+            left_nonpartition_cols = list(
+                set(left_tsdf.df.columns).difference(set(self.partitionCols))
+            )
+            right_nonpartition_cols = list(
+                set(right_tsdf.df.columns).difference(set(self.partitionCols))
+            )
 
-          # For both dataframes get all non-partition columns (including ts_col)
-          left_columns = [left_tsdf.ts_col] + left_nonpartition_cols
-          right_columns = [right_tsdf.ts_col] + right_nonpartition_cols
+            # For both dataframes get all non-partition columns (including ts_col)
+            left_columns = [left_tsdf.ts_col] + left_nonpartition_cols
+            right_columns = [right_tsdf.ts_col] + right_nonpartition_cols
 
-          # Union both dataframes, and create a combined TS column
-          combined_ts_col = "combined_ts"
-          combined_df = left_tsdf.__addColumnsFromOtherDF(right_columns).__combineTSDF(
-              right_tsdf.__addColumnsFromOtherDF(left_columns), combined_ts_col
-          )
-          combined_df.df = combined_df.df.withColumn(
-              "rec_ind", 
-              sfn.when(sfn.col(left_tsdf.ts_col).isNotNull(), 1).otherwise(-1),
-          )
+            # Union both dataframes, and create a combined TS column
+            combined_ts_col = "combined_ts"
+            combined_df = left_tsdf.__addColumnsFromOtherDF(
+                right_columns
+            ).__combineTSDF(
+                right_tsdf.__addColumnsFromOtherDF(left_columns), combined_ts_col
+            )
+            combined_df.df = combined_df.df.withColumn(
+                "rec_ind",
+                sfn.when(sfn.col(left_tsdf.ts_col).isNotNull(), 1).otherwise(-1),
+            )
 
-          # perform asof join.
-          if tsPartitionVal is None:
-              asofDF = combined_df.__getLastRightRow(
-                  left_tsdf.ts_col,
-                  right_columns,
-                  right_tsdf.sequence_col,
-                  tsPartitionVal,
-                  skipNulls,
-                  suppress_null_warning,
-              )
-          else:
-              tsPartitionDF = combined_df.__getTimePartitions(
-                  tsPartitionVal, fraction=fraction
-              )
-              asofDF = tsPartitionDF.__getLastRightRow(
-                  left_tsdf.ts_col,
-                  right_columns,
-                  right_tsdf.sequence_col,
-                  tsPartitionVal,
-                  skipNulls,
-                  suppress_null_warning,
-              )
+            # perform asof join.
+            if tsPartitionVal is None:
+                asofDF = combined_df.__getLastRightRow(
+                    left_tsdf.ts_col,
+                    right_columns,
+                    right_tsdf.sequence_col,
+                    tsPartitionVal,
+                    skipNulls,
+                    suppress_null_warning,
+                )
+            else:
+                tsPartitionDF = combined_df.__getTimePartitions(
+                    tsPartitionVal, fraction=fraction
+                )
+                asofDF = tsPartitionDF.__getLastRightRow(
+                    left_tsdf.ts_col,
+                    right_columns,
+                    right_tsdf.sequence_col,
+                    tsPartitionVal,
+                    skipNulls,
+                    suppress_null_warning,
+                )
 
                 # Get rid of overlapped data and the extra columns generated from timePartitions
                 df = asofDF.df.filter(sfn.col("is_original") == 1).drop(
                     "ts_partition", "is_original"
                 )
-
                 asofDF = TSDF(df, asofDF.ts_col, combined_df.partitionCols)
 
-          if tolerance is not None:
-              df = asofDF.df
-              left_ts_col = left_tsdf.ts_col
-              right_ts_col = right_tsdf.ts_col
-              tolerance_condition = (
-                  df[left_ts_col].cast("double") - df[right_ts_col].cast("double")
-                  > tolerance
-              )
+            if tolerance is not None:
+                df = asofDF.df
+                left_ts_col = left_tsdf.ts_col
+                right_ts_col = right_tsdf.ts_col
+                tolerance_condition = (
+                    df[left_ts_col].cast("double") - df[right_ts_col].cast("double")
+                    > tolerance
+                )
 
-              for right_col in right_columns:
-                  # First set right non-timestamp columns to null for rows outside of tolerance band
-                  if right_col != right_ts_col:
-                      df = df.withColumn(
-                          right_col,
-                          sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
-                              df[right_col]
-                          ),
-                      )
+                for right_col in right_columns:
+                    # First set right non-timestamp columns to null for rows outside of tolerance band
+                    if right_col != right_ts_col:
+                        df = df.withColumn(
+                            right_col,
+                            sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
+                                df[right_col]
+                            ),
+                        )
 
-              # Finally, set right timestamp column to null for rows outside of tolerance band
-              df = df.withColumn(
-                  right_ts_col,
-                  sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
-                      df[right_ts_col]
-                  ),
-              )
-              asofDF.df = df
+                # Finally, set right timestamp column to null for rows outside of tolerance band
+                df = df.withColumn(
+                    right_ts_col,
+                    sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
+                        df[right_ts_col]
+                    ),
+                )
+                asofDF.df = df
 
-          return asofDF
+            return asofDF
 
     def __baseWindow(
         self, sort_col: Optional[str] = None, reverse: bool = False
@@ -1089,10 +1095,7 @@ class TSDF:
         )
 
     def __rowsBetweenWindow(
-        self,
-        rows_from: int,
-        rows_to: int,
-        reverse: bool = False,
+        self, rows_from: int, rows_to: int, reverse: bool = False
     ) -> WindowSpec:
         return self.__baseWindow(reverse=reverse).rowsBetween(rows_from, rows_to)
 
@@ -1106,10 +1109,7 @@ class TSDF:
         return TSDF(self.df, self.ts_col, partitionCols)
 
     def vwap(
-        self,
-        frequency: str = "m",
-        volume_col: str = "volume",
-        price_col: str = "price",
+        self, frequency: str = "m", volume_col: str = "volume", price_col: str = "price"
     ) -> "TSDF":
         # set pre_vwap as self or enrich with the frequency
         pre_vwap = self.df
@@ -1292,9 +1292,7 @@ class TSDF:
         return TSDF(summary_df, self.ts_col, self.partitionCols)
 
     def withGroupedStats(
-        self,
-        metricCols: Optional[List[str]] = None,
-        freq: Optional[str] = None,
+        self, metricCols: Optional[List[str]] = None, freq: Optional[str] = None
     ) -> "TSDF":
         """
         Create a wider set of stats based on all numeric columns by default
@@ -1366,16 +1364,17 @@ class TSDF:
         optimizationCols: Optional[List[str]] = None,
         mode: str = "append",
         options: dict = {},
-        triggerOptions:dict = {},
-    )-> None:
-        tio.write(self,
-                  spark=spark,
-                  tabName=tabName,
-                  optimizationCols=optimizationCols,
-                  mode=mode,
-                  options=options,
-                  triggerOptions=triggerOptions
-         )
+        triggerOptions: dict = {},
+    ) -> None:
+        tio.write(
+            self,
+            spark=spark,
+            tabName=tabName,
+            optimizationCols=optimizationCols,
+            mode=mode,
+            options=options,
+            triggerOptions=triggerOptions,
+        )
 
     def resample(
         self,
@@ -1524,9 +1523,7 @@ class TSDF:
         :param valueCol: name of the time domain data column which will be transformed
         """
 
-        def tempo_fourier_util(
-            pdf: pd.DataFrame,
-        ) -> pd.DataFrame:
+        def tempo_fourier_util(pdf: pd.DataFrame) -> pd.DataFrame:
             """
             This method is a vanilla python logic implementing fourier transform on a numpy array using the scipy module.
             This method is meant to be called from Tempo TSDF as a pandas function API on Spark
@@ -1571,10 +1568,7 @@ class TSDF:
                 group_cols = self.partitionCols
                 data = (
                     data.select(
-                        *group_cols,
-                        self.ts_col,
-                        self.sequence_col,
-                        sfn.col(valueCol),
+                        *group_cols, self.ts_col, self.sequence_col, sfn.col(valueCol)
                     )
                     .withColumn("tdval", sfn.col(valueCol))
                     .withColumn("tpoints", sfn.col(self.ts_col))
@@ -1698,8 +1692,7 @@ class TSDF:
 
         # Get previous timestamp to identify start time of the interval
         data = data.withColumn(
-            "previous_ts",
-            sfn.lag(sfn.col(self.ts_col), offset=1).over(w),
+            "previous_ts", sfn.lag(sfn.col(self.ts_col), offset=1).over(w)
         )
 
         # Determine state intervals using user-provided the state comparison function
@@ -1725,8 +1718,7 @@ class TSDF:
 
         # Count the distinct state changes to get the unique intervals
         data = data.withColumn(
-            "state_incrementer",
-            sfn.sum(sfn.col("state_change").cast("int")).over(w),
+            "state_incrementer", sfn.sum(sfn.col("state_change").cast("int")).over(w)
         ).filter(~sfn.col("state_change"))
 
         # Find the start and end timestamp of the interval

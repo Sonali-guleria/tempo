@@ -48,7 +48,6 @@ def write(
 
     useDeltaOpt = os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
 
-
     if not view_df.isStreaming:
         if optimizationCols:
             optimizationCols = optimizationCols + ["event_time"]
@@ -59,20 +58,20 @@ def write(
         ).saveAsTable(table_name)
 
         if useDeltaOpt:
-          try:
-            spark.sql(
-              f"optimize {table_name} zorder by {'(' + ','.join(partitionCols + optimization_cols) + ')'}"
-            )
-          except ParseException as e:
-              logger.error(
-                  f"Delta optimizations attempted, but was not successful.\nError: {e}"
-              )
+            try:
+                spark.sql(
+                    f"optimize {table_name} zorder by {'(' + ','.join(partitionCols + optimization_cols) + ')'}"
+                )
+            except ParseException as e:
+                logger.error(
+                    f"Delta optimizations attempted, but was not successful.\nError: {e}"
+                )
         else:
-        logger.warning(
-            "Delta optimizations attempted on a non-Databricks platform. "
-            "Switch to use Databricks Runtime to get optimization advantages."
-        )
-        
+            logger.warning(
+                "Delta optimizations attempted on a non-Databricks platform. "
+                "Switch to use Databricks Runtime to get optimization advantages."
+            )
+
     else:
         if "checkpointLocation" not in options:
             logger.warning(

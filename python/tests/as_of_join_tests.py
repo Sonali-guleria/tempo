@@ -163,7 +163,7 @@ class AsOfJoinTest(SparkTest):
                 tsdf_right, left_prefix="left", right_prefix="right"
             ).df
             self.assertDataFrameEquality(spark_sql_joined_df, dfExpected)
-            
+
     def test_streaming_asofJoin(self):
         tsdf_left = self.get_data_as_tsdf("left")
         tsdf_right = self.get_data_as_tsdf("right")
@@ -175,14 +175,14 @@ class AsOfJoinTest(SparkTest):
             self.spark.readStream.format("delta")
             .table("left_ts_table")
             .withColumn("event_ts", f.col("event_ts").cast("timestamp"))
-            .withWatermark("event_ts", "30 minutes")
+            .withWatermark("event_ts", "10 minutes")
         )
 
         df_quotes = (
             self.spark.readStream.format("delta")
             .table("right_ts_table")
             .withColumn("event_ts", f.col("event_ts").cast("timestamp"))
-            .withWatermark("event_ts", "30 minutes")
+            .withWatermark("event_ts", "10 minutes")
         )
         left = TSDF(df_trades, partition_cols=["symbol"], ts_col="event_ts")
         right = TSDF(df_quotes, partition_cols=["symbol"], ts_col="event_ts")
