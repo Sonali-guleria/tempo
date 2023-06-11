@@ -157,6 +157,7 @@ class TSDF:
         """
         Add prefix to all specified columns.
         """
+
         if prefix != "":
             prefix = prefix + "_"
 
@@ -167,7 +168,6 @@ class TSDF:
             range(len(col_list)),
             self.df,
         )
-
         if prefix == "":
             ts_col = self.ts_col
             seq_col = self.sequence_col if self.sequence_col else self.sequence_col
@@ -178,7 +178,17 @@ class TSDF:
                 if self.sequence_col
                 else self.sequence_col
             )
-        return TSDF(df, ts_col, self.partitionCols, sequence_col=seq_col)
+
+        if any(part in col_list for part in self.partitionCols):
+            old_part = self.partitionCols
+            new_cols = df.columns
+            new_partitionCols = [
+                new for old in old_part for new in new_cols if old in new
+            ]
+        else:
+            new_partitionCols = self.partitionCols
+
+        return TSDF(df, ts_col, new_partitionCols, sequence_col=seq_col)
 
     def __addColumnsFromOtherDF(self, other_cols: Sequence[str]) -> "TSDF":
         """
@@ -726,6 +736,9 @@ class TSDF:
         sql_join_opt: bool = False,
         suppress_null_warning: bool = False,
         tolerance: Optional[int] = None,
+        write_mode: str = "append",
+        interim_table: str = None,
+        options: dict = {},
     ) -> "TSDF":
         """
         Performs an as-of join between two time-series. If a tsPartitionVal is
@@ -745,184 +758,301 @@ class TSDF:
         :param suppress_null_warning - when tsPartitionVal is specified, will collect min of each column and raise warnings about null values, set to True to avoid
         :param tolerance - only join values within this tolerance range (inclusive), expressed in number of seconds as a double
         """
-
-        # first block of logic checks whether a standard range join will suffice
-        left_df = self.df
-        right_df = right_tsdf.df
-
-        # test if the broadcast join will be efficient
-        if sql_join_opt:
-            spark = SparkSession.builder.getOrCreate()
-            left_bytes = self.__getBytesFromPlan(left_df, spark)
-            right_bytes = self.__getBytesFromPlan(right_df, spark)
-
-            # choose 30MB as the cutoff for the broadcast
-            bytes_threshold = 30 * 1024 * 1024
-            if (left_bytes < bytes_threshold) or (right_bytes < bytes_threshold):
-                spark.conf.set("spark.databricks.optimizer.rangeJoin.binSize", 60)
-                partition_cols = right_tsdf.partitionCols
-                left_cols = list(set(left_df.columns) - set(self.partitionCols))
-                right_cols = list(set(right_df.columns) - set(right_tsdf.partitionCols))
-
-                left_prefix = (
-                    ""
-                    if ((left_prefix is None) | (left_prefix == ""))
-                    else left_prefix + "_"
-                )
-                right_prefix = (
-                    ""
-                    if ((right_prefix is None) | (right_prefix == ""))
-                    else right_prefix + "_"
-                )
-
-                w = Window.partitionBy(*partition_cols).orderBy(
-                    right_prefix + right_tsdf.ts_col
-                )
-
-                new_left_ts_col = left_prefix + self.ts_col
-                new_left_cols = [
-                    sfn.col(c).alias(left_prefix + c) for c in left_cols
-                ] + partition_cols
-                new_right_cols = [
-                    sfn.col(c).alias(right_prefix + c) for c in right_cols
-                ] + partition_cols
-                quotes_df_w_lag = right_df.select(*new_right_cols).withColumn(
-                    "lead_" + right_tsdf.ts_col,
-                    sfn.lead(right_prefix + right_tsdf.ts_col).over(w),
-                )
-                left_df = left_df.select(*new_left_cols)
-                res = (
-                    left_df.join(quotes_df_w_lag, partition_cols)
-                    .where(
-                        left_df[new_left_ts_col].between(
-                            sfn.col(right_prefix + right_tsdf.ts_col),
-                            sfn.coalesce(
-                                sfn.col("lead_" + right_tsdf.ts_col),
-                                sfn.lit("2099-01-01").cast("timestamp"),
-                            ),
-                        )
-                    )
-                    .drop("lead_" + right_tsdf.ts_col)
-                )
-                return TSDF(
-                    res, partition_cols=self.partitionCols, ts_col=new_left_ts_col
-                )
-
-        # end of block checking to see if standard Spark SQL join will work
-
-        if tsPartitionVal is not None:
-            logger.warning(
-                "You are using the skew version of the AS OF join. This may result in null values if there are any "
-                "values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum "
-                "lookback, trading off performance and potential blank AS OF values for sparse keys"
-            )
-
+        
         # Check whether partition columns have same name in both dataframes
         self.__checkPartitionCols(right_tsdf)
-
-        # prefix non-partition columns, to avoid duplicated columns.
-        left_df = self.df
-        right_df = right_tsdf.df
-
         # validate timestamp datatypes match
         self.__validateTsColMatch(right_tsdf)
 
-        orig_left_col_diff = list(
-            set(left_df.columns).difference(set(self.partitionCols))
-        )
-        orig_right_col_diff = list(
-            set(right_df.columns).difference(set(self.partitionCols))
-        )
-
-        left_tsdf = (
-            (self.__addPrefixToColumns([self.ts_col] + orig_left_col_diff, left_prefix))
-            if left_prefix is not None
-            else self
-        )
-        right_tsdf = right_tsdf.__addPrefixToColumns(
-            [right_tsdf.ts_col] + orig_right_col_diff, right_prefix
-        )
-
-        left_nonpartition_cols = list(
-            set(left_tsdf.df.columns).difference(set(self.partitionCols))
-        )
-        right_nonpartition_cols = list(
-            set(right_tsdf.df.columns).difference(set(self.partitionCols))
-        )
-
-        # For both dataframes get all non-partition columns (including ts_col)
-        left_columns = [left_tsdf.ts_col] + left_nonpartition_cols
-        right_columns = [right_tsdf.ts_col] + right_nonpartition_cols
-
-        # Union both dataframes, and create a combined TS column
-        combined_ts_col = "combined_ts"
-        combined_df = left_tsdf.__addColumnsFromOtherDF(right_columns).__combineTSDF(
-            right_tsdf.__addColumnsFromOtherDF(left_columns), combined_ts_col
-        )
-        combined_df.df = combined_df.df.withColumn(
-            "rec_ind",
-            sfn.when(sfn.col(left_tsdf.ts_col).isNotNull(), 1).otherwise(-1),
-        )
-
-        # perform asof join.
-        if tsPartitionVal is None:
-            asofDF = combined_df.__getLastRightRow(
-                left_tsdf.ts_col,
-                right_columns,
-                right_tsdf.sequence_col,
-                tsPartitionVal,
-                skipNulls,
-                suppress_null_warning,
+        if self.df.isStreaming and right_tsdf.df.isStreaming:
+            spark = (
+                SparkSession.builder.appName("myStreamingApp")
+                .enableHiveSupport()
+                .getOrCreate()
             )
-        else:
-            tsPartitionDF = combined_df.__getTimePartitions(
-                tsPartitionVal, fraction=fraction
+            left_interval = re.search(
+                "EventTimeWatermark(.+?)\n", self.df._jdf.queryExecution().toString()
             )
-            asofDF = tsPartitionDF.__getLastRightRow(
-                left_tsdf.ts_col,
-                right_columns,
-                right_tsdf.sequence_col,
-                tsPartitionVal,
-                skipNulls,
-                suppress_null_warning,
+            right_interval = re.search(
+                "EventTimeWatermark(.+?)\n",
+                right_tsdf.df._jdf.queryExecution().toString(),
+            )
+            if left_interval:
+                left_interval = left_interval.group(1).split(", ")[1]
+                # self.df = self.df.withWatermark(self.ts_col,left_interval)
+            else:
+                left_interval = "10 minutes"
+                self.df = self.df.withWatermark(
+                    self.ts_col, left_interval
+                )  # adding a default watermark if user did not provide one
+            if right_interval:
+                right_interval = right_interval.group(1).split(", ")[1]
+                # right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col,right_interval)
+            else:
+                right_interval = "10 minutes"
+                right_tsdf.df = right_tsdf.df.withWatermark(self.ts_col, right_interval)
+            cmp_sql = f"SELECT current_date + INTERVAL {left_interval} >= current_date + INTERVAL {right_interval}"
+            watermark_threshold = spark.sql(cmp_sql).collect()[0][0]
+            watermark_threshold = (
+                right_interval if watermark_threshold else left_interval
             )
 
-            # Get rid of overlapped data and the extra columns generated from timePartitions
-            df = asofDF.df.filter(sfn.col("is_original") == 1).drop(
-                "ts_partition", "is_original"
+            left = (
+                (self.__addPrefixToColumns(self.df.columns, left_prefix))
+                if left_prefix is not None
+                else self
             )
+            # query = right_tsdf.df.writeStream.format("console").start()
+            # import time
+            # time.sleep(2) # sleep 10 seconds
+            # query.stop()
+            right = right_tsdf.__addPrefixToColumns(right_tsdf.df.columns, right_prefix)
 
-            asofDF = TSDF(df, asofDF.ts_col, combined_df.partitionCols)
+            def streamingAsOfJoin(left, right):
+                left_cols = ["Left." + r for r in left.partitionCols]
+                right_cols = ["Right." + r for r in right.partitionCols]
+                join_condition = " And ".join(
+                    "=".join(x) for x in zip(left_cols, right_cols)
+                )
+                join_condition += " AND {} >= {}".format(left.ts_col, right.ts_col)
+                joined_df = left.df.alias("left").join(
+                    right.df.alias("Right"),
+                    f.expr("""{}""".format(join_condition)),
+                    how="leftOuter",
+                )
+                joined_df = joined_df.drop(*right.partitionCols)
+                # joined_df_tsdf = TSDF(joined_df, partition_cols=self.partitionCols, ts_col= self.ts_col)
+                return joined_df
 
-        if tolerance is not None:
-            df = asofDF.df
-            left_ts_col = left_tsdf.ts_col
-            right_ts_col = right_tsdf.ts_col
-            tolerance_condition = (
-                df[left_ts_col].cast("double") - df[right_ts_col].cast("double")
-                > tolerance
+            joined_df = streamingAsOfJoin(left, right)
+            # writer = reduce(lambda x, y: x.option(y[0], y[1]), options.items(), joined_df.writeStream.queryName("Interim_Results"))
+            if not interim_table:
+                logger.warning(
+                    "You did not provide interim_table(default: interim_results). This is not necessary but "
+                    "recommended as streaming interim results will be stored in this table. You can also provide "
+                    "additional options. "
+                )
+                interim_table = "interim_results"
+            if "checkpointLocation" not in options:
+                options["checkpointLocation"] = (
+                    "/tmp/tempo/streaming_checkpoints/" + interim_table
+                )
+                logger.warning(
+                    "You did not provide checkpoint location for the interim results in options. Using the default "
+                    "/tmp/tempo/streaming_checkpoints/{}".format(interim_table)
+                )
+            joined_df.writeStream.options(**options).queryName(interim_table).toTable(
+                interim_table
             )
+            # self.sequence_col
+            group_cols = left.partitionCols + [left.ts_col]
 
-            for right_col in right_columns:
-                # First set right non-timestamp columns to null for rows outside of tolerance band
-                if right_col != right_ts_col:
-                    df = df.withColumn(
-                        right_col,
-                        sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
-                            df[right_col]
-                        ),
+            if self.sequence_col:
+                group_cols = group_cols + [self.sequence_col]
+            struct_cols = [
+                x for x in joined_df.columns if x not in ([right.ts_col] + group_cols)
+            ]
+            struct_cols_s = ",".join(map(str, struct_cols))
+            max_ts = right.ts_col
+            joined_df = spark.readStream.table(interim_table).withWatermark(
+                left.ts_col, watermark_threshold
+            )
+            joined_df_dedup = joined_df.groupBy(group_cols).agg(
+                f.max(max_ts).alias(max_ts),
+                f.expr(
+                    "max_by(struct({struct_cols}),{max_ts}) as struct_cols".format(
+                        struct_cols=struct_cols_s, max_ts=max_ts
                     )
-
-            # Finally, set right timestamp column to null for rows outside of tolerance band
-            df = df.withColumn(
-                right_ts_col,
-                sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
-                    df[right_ts_col]
                 ),
             )
-            asofDF.df = df
+            joined_df_dedup = joined_df_dedup.select(
+                group_cols + [max_ts] + ["struct_cols.*"]
+            )
+            joined_df_dedup = TSDF(
+                joined_df_dedup, partition_cols=left.partitionCols, ts_col=left.ts_col
+            )
+            return joined_df_dedup
 
-        return asofDF
+        elif any(
+            [
+                (not self.df.isStreaming and right_tsdf.df.isStreaming),
+                (self.df.isStreaming and not right_tsdf.df.isStreaming),
+            ]
+        ):
+            logger.error("Static-stream join is not available yet.")
+            raise TypeError("Static-stream join is not available yet.")
+        else:
+          # first block of logic checks whether a standard range join will suffice
+          left_df = self.df
+          right_df = right_tsdf.df
+
+          # test if the broadcast join will be efficient
+          if sql_join_opt:
+              spark = SparkSession.builder.getOrCreate()
+              left_bytes = self.__getBytesFromPlan(left_df, spark)
+              right_bytes = self.__getBytesFromPlan(right_df, spark)
+
+              # choose 30MB as the cutoff for the broadcast
+              bytes_threshold = 30 * 1024 * 1024
+              if (left_bytes < bytes_threshold) or (right_bytes < bytes_threshold):
+                  spark.conf.set("spark.databricks.optimizer.rangeJoin.binSize", 60)
+                  partition_cols = right_tsdf.partitionCols
+                  left_cols = list(set(left_df.columns) - set(self.partitionCols))
+                  right_cols = list(set(right_df.columns) - set(right_tsdf.partitionCols))
+
+                  left_prefix = (
+                      ""
+                      if ((left_prefix is None) | (left_prefix == ""))
+                      else left_prefix + "_"
+                  )
+                  right_prefix = (
+                      ""
+                      if ((right_prefix is None) | (right_prefix == ""))
+                      else right_prefix + "_"
+                  )
+
+                  w = Window.partitionBy(*partition_cols).orderBy(
+                      right_prefix + right_tsdf.ts_col
+                  )
+
+                  new_left_ts_col = left_prefix + self.ts_col
+                  new_left_cols = [
+                      sfn.col(c).alias(left_prefix + c) for c in left_cols
+                  ] + partition_cols
+                  new_right_cols = [
+                      sfn.col(c).alias(right_prefix + c) for c in right_cols
+                  ] + partition_cols
+                  quotes_df_w_lag = right_df.select(*new_right_cols).withColumn(
+                      "lead_" + right_tsdf.ts_col,
+                      sfn.lead(right_prefix + right_tsdf.ts_col).over(w),
+                  )
+                  left_df = left_df.select(*new_left_cols)
+                  res = (
+                      left_df.join(quotes_df_w_lag, partition_cols)
+                      .where(
+                          left_df[new_left_ts_col].between(
+                              sfn.col(right_prefix + right_tsdf.ts_col),
+                              sfn.coalesce(
+                                  sfn.col("lead_" + right_tsdf.ts_col),
+                                  sfn.lit("2099-01-01").cast("timestamp"),
+                              ),
+                          )
+                      )
+                      .drop("lead_" + right_tsdf.ts_col)
+                  )
+                  return TSDF(
+                      res, partition_cols=self.partitionCols, ts_col=new_left_ts_col
+                  )
+
+          # end of block checking to see if standard Spark SQL join will work
+
+          if tsPartitionVal is not None:
+              logger.warning(
+                  "You are using the skew version of the AS OF join. This may result in null values if there are any "
+                  "values outside of the maximum lookback. For maximum efficiency, choose smaller values of maximum "
+                  "lookback, trading off performance and potential blank AS OF values for sparse keys"
+              )
+
+          # prefix non-partition columns, to avoid duplicated columns.
+          left_df = self.df
+          right_df = right_tsdf.df
+
+          orig_left_col_diff = list(
+              set(left_df.columns).difference(set(self.partitionCols))
+          )
+          orig_right_col_diff = list(
+              set(right_df.columns).difference(set(self.partitionCols))
+          )
+
+          left_tsdf = (
+              (self.__addPrefixToColumns([self.ts_col] + orig_left_col_diff, left_prefix))
+              if left_prefix is not None
+              else self
+          )
+          right_tsdf = right_tsdf.__addPrefixToColumns(
+              [right_tsdf.ts_col] + orig_right_col_diff, right_prefix
+          )
+
+          left_nonpartition_cols = list(
+              set(left_tsdf.df.columns).difference(set(self.partitionCols))
+          )
+          right_nonpartition_cols = list(
+              set(right_tsdf.df.columns).difference(set(self.partitionCols))
+          )
+
+          # For both dataframes get all non-partition columns (including ts_col)
+          left_columns = [left_tsdf.ts_col] + left_nonpartition_cols
+          right_columns = [right_tsdf.ts_col] + right_nonpartition_cols
+
+          # Union both dataframes, and create a combined TS column
+          combined_ts_col = "combined_ts"
+          combined_df = left_tsdf.__addColumnsFromOtherDF(right_columns).__combineTSDF(
+              right_tsdf.__addColumnsFromOtherDF(left_columns), combined_ts_col
+          )
+          combined_df.df = combined_df.df.withColumn(
+              "rec_ind", 
+              sfn.when(sfn.col(left_tsdf.ts_col).isNotNull(), 1).otherwise(-1),
+          )
+
+          # perform asof join.
+          if tsPartitionVal is None:
+              asofDF = combined_df.__getLastRightRow(
+                  left_tsdf.ts_col,
+                  right_columns,
+                  right_tsdf.sequence_col,
+                  tsPartitionVal,
+                  skipNulls,
+                  suppress_null_warning,
+              )
+          else:
+              tsPartitionDF = combined_df.__getTimePartitions(
+                  tsPartitionVal, fraction=fraction
+              )
+              asofDF = tsPartitionDF.__getLastRightRow(
+                  left_tsdf.ts_col,
+                  right_columns,
+                  right_tsdf.sequence_col,
+                  tsPartitionVal,
+                  skipNulls,
+                  suppress_null_warning,
+              )
+
+                # Get rid of overlapped data and the extra columns generated from timePartitions
+                df = asofDF.df.filter(sfn.col("is_original") == 1).drop(
+                    "ts_partition", "is_original"
+                )
+
+                asofDF = TSDF(df, asofDF.ts_col, combined_df.partitionCols)
+
+          if tolerance is not None:
+              df = asofDF.df
+              left_ts_col = left_tsdf.ts_col
+              right_ts_col = right_tsdf.ts_col
+              tolerance_condition = (
+                  df[left_ts_col].cast("double") - df[right_ts_col].cast("double")
+                  > tolerance
+              )
+
+              for right_col in right_columns:
+                  # First set right non-timestamp columns to null for rows outside of tolerance band
+                  if right_col != right_ts_col:
+                      df = df.withColumn(
+                          right_col,
+                          sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
+                              df[right_col]
+                          ),
+                      )
+
+              # Finally, set right timestamp column to null for rows outside of tolerance band
+              df = df.withColumn(
+                  right_ts_col,
+                  sfn.when(tolerance_condition, sfn.lit(None)).otherwise(
+                      df[right_ts_col]
+                  ),
+              )
+              asofDF.df = df
+
+          return asofDF
 
     def __baseWindow(
         self, sort_col: Optional[str] = None, reverse: bool = False
@@ -1234,8 +1364,18 @@ class TSDF:
         spark: SparkSession,
         tabName: str,
         optimizationCols: Optional[List[str]] = None,
-    ) -> None:
-        t_io.write(self, spark, tabName, optimizationCols)
+        mode: str = "append",
+        options: dict = {},
+        triggerOptions:dict = {},
+    )-> None:
+        tio.write(self,
+                  spark=spark,
+                  tabName=tabName,
+                  optimizationCols=optimizationCols,
+                  mode=mode,
+                  options=options,
+                  triggerOptions=triggerOptions
+         )
 
     def resample(
         self,

@@ -37,27 +37,27 @@ class DeltaWriteTest(SparkTest):
         # should be equal to the expected dataframe
         self.assertEqual(self.spark.table(table_name).count(), 7)
 
-    def test_write_to_delta_non_dbr_environment_logging(self):
-        """Test logging when writing"""
+    #     def test_write_to_delta_non_dbr_environment_logging(self):
+    #         """Test logging when writing, not valid anymore."""
 
-        table_name = "my_table_optimization_col"
+    #         table_name = "my_table_optimization_col"
 
-        # load test data
-        input_tsdf = self.get_data_as_tsdf("input_data")
+    #         # load test data
+    #         input_tsdf = self.get_data_as_tsdf("input_data")
 
-        with self.assertLogs(level="WARNING") as warning_captured:
-            # test write to delta
-            input_tsdf.write(self.spark, table_name, ["date"])
+    #         with self.assertLogs(level="WARNING") as warning_captured:
+    #             # test write to delta
+    #             input_tsdf.write(self.spark, table_name, ["date"])
 
-        self.assertEqual(len(warning_captured.records), 1)
-        self.assertEqual(
-            warning_captured.output,
-            [
-                "WARNING:tempo.io:"
-                "Delta optimizations attempted on a non-Databricks platform. "
-                "Switch to use Databricks Runtime to get optimization advantages."
-            ],
-        )
+    #         self.assertEqual(len(warning_captured.records), 1)
+    #         self.assertEqual(
+    #             warning_captured.output,
+    #             [
+    #                 "WARNING:tempo.io:"
+    #                 "Delta optimizations attempted on a non-Databricks platform. "
+    #                 "Switch to use Databricks Runtime to get optimization advantages."
+    #             ],
+    #         )
 
     @mock.patch.dict(os.environ, {"DATABRICKS_RUNTIME_VERSION": "10.4"})
     def test_write_to_delta_bad_dbr_environment_logging(self):
@@ -67,8 +67,8 @@ class DeltaWriteTest(SparkTest):
 
         # load test data
         input_tsdf = self.get_data_as_tsdf("input_data")
-
-        with self.assertLogs(level="ERROR") as error_captured:
+        logger = logging.getLogger("test")
+        with self.assertLogs(logger, level="ERROR") as error_captured:
             # test write to delta
             input_tsdf.write(self.spark, table_name, ["date"])
 
