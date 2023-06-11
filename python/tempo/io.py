@@ -55,12 +55,12 @@ def write(
             optimizationCols = ["event_time"]
         view_df.write.mode(mode).partitionBy("event_dt").options(**options).format(
             "delta"
-        ).saveAsTable(table_name)
+        ).saveAsTable(tabName)
 
         if useDeltaOpt:
             try:
                 spark.sql(
-                    f"optimize {table_name} zorder by {'(' + ','.join(partitionCols + optimization_cols) + ')'}"
+                    f"optimize {tabName} zorder by {'(' + ','.join(partitionCols + optimizationCols) + ')'}"
                 )
             except ParseException as e:
                 logger.error(
@@ -78,7 +78,7 @@ def write(
                 f"No Checkpoint location provided in options; using default /tmp/tempo/streaming_checkpoints/{table_name}"
             )
             options["checkpointLocation"] = (
-                "/tmp/tempo/streaming_checkpoints/" + table_name
+                "/tmp/tempo/streaming_checkpoints/" + tabName
             )
         if triggerOptions:
             view_df.writeStream.trigger(**triggerOptions).partitionBy(
