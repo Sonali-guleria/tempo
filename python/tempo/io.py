@@ -19,7 +19,7 @@ def write(
     spark: SparkSession,
     tabName: str,
     optimizationCols: Optional[list[str]] = None,
-    mode: str = "append",
+    mode: str = None,
     options: dict = {},
     triggerOptions: dict = {},
 ) -> None:
@@ -49,6 +49,8 @@ def write(
     useDeltaOpt = os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
 
     if not view_df.isStreaming:
+        if not mode:
+            mode = "errorifexists"
         if optimizationCols:
             optimizationCols = optimizationCols + ["event_time"]
         else:
@@ -73,9 +75,11 @@ def write(
             )
 
     else:
+        if not mode:
+            mode = "append"
         if "checkpointLocation" not in options:
             logger.warning(
-                f"No Checkpoint location provided in options; using default /tmp/tempo/streaming_checkpoints/{table_name}"
+                f"No Checkpoint location provided in options; using default /tmp/tempo/streaming_checkpoints/{tabName}"
             )
             options["checkpointLocation"] = (
                 "/tmp/tempo/streaming_checkpoints/" + tabName

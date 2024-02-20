@@ -47,7 +47,7 @@ class DeltaWriteTest(SparkTest):
 
         with self.assertLogs(level="WARNING") as warning_captured:
             # test write to delta
-            input_tsdf.write(self.spark, table_name, ["date"])
+            input_tsdf.write(self.spark, table_name, ["date"], mode="overwrite")
 
         self.assertEqual(len(warning_captured.records), 1)
         self.assertEqual(
